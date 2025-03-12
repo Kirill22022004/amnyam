@@ -3,6 +3,9 @@
 ## Список всех команд, которые были выполнены на сервере
 
 ### Создаем символические ссылки
+
+<img width="583" alt="image" src="https://github.com/user-attachments/assets/8cdfc046-9759-4d04-b547-3a909284194c" />
+
 ```
 ls /usr/share/data-minor-bioinf/assembly/
 
