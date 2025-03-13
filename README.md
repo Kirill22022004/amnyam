@@ -10,12 +10,12 @@
 Выбить чекпоинт удалось с такими параметрами. Слова, которые встречались не более 1 раза я заменял на \<unk\>.
 
 Оптимайзер 
-```python
+```python3
 optim.AdamW(model.parameters(), lr = 1e-4, weight_decay = 0.333)
 ```
 
 Параметры трансфомера
-```python
+```python3
 d_model = 512, nhead = 8,
 num_encoder_layers = 3, num_decoder_layers = 3,
 dim_feedforward = 2048, dropout = 0.1,
@@ -25,7 +25,7 @@ dim_feedforward = 2048, dropout = 0.1,
 
 Тут и далее, чтобы экономить время, я обучал далеко не на всех данных, вот таким наивным образом ограничивая выборки.
 
-```python
+```python3
 train_src = read_file(train_de_path)[:80000]
 train_trg = read_file(train_en_path)[:80000]
 valid_src = read_file(valid_de_path)[:200]
@@ -53,5 +53,90 @@ test_src  = read_file(test_de_path)
 * min_freq (если слово встречается в предложениях обучающей выборки на английском/немецком меньше min_freq раз, оно заменялось на \<unk\>)
   Попробовал варианты 1, 2, 7, 10, 12. Чем больше этот параметр, тем меньше размер алфавита и быстрее обучение (да и на самом деле получше в плане метрик). У меня был общий этот параметр, как для английского словаря, так и для немецкого, что я потом в итоге понимаю на 2 параметра. Значения 7-12 показали себя лучше всего в плане соотношения время обучения - результат, брать все слова очень долго учится, а если брать min_freq больше 12, то получаем достаточно маленький словарь слов на каждом из языков, что не приведёт к хорошему качеству.
 * MAXLEN (max_len) - длина, к которой я привожу каждое предложение, дописывая \<pad\> в конец. Тут я ориентировался на длину предложений из выборок и выбрал число 40. В итоговой модели взял 80, потому что некоторые предложения были чуть подлиннее на глаз.
-* У модели дефолтные
+* Параметры трансформера.
+  
+  Тут не смог достаточно много экспериментов провести и опробовал всего 2 варианта.
+    
+  ```python3
+  d_model = 512, nhead = 8,
+  num_encoder_layers = 3, num_decoder_layers = 3,
+  dim_feedforward = 2048, dropout = 0.1,
+  ```
+  
+  ```python3
+  d_model = 256, nhead = 8,
+  num_encoder_layers = 3, num_decoder_layers = 3,
+  dim_feedforward = 1024, dropout = 0.1,
+  ```
+  
+  В итоге остановился на первом варианте, модель побольше, в ней больше обучаемых параметров. Учится конечно помедленнее, зато даёт значительно лучшее качество.
+
+* optimizer и scheduler
+
+   Тут был простор для исследований. Начинал с такого варианта.
+   ```python3
+    optim.Adam(model.parameters(), lr = 1e-4)
+    ```
+    После решил добавить регуляризацию, поменяв Adam на AdamW.
+     ```python3
+    optim.AdamW(model.parameters(), lr = 1e-4, weight_decay = 0.333)
+    ```
+    Потом испытал два похожих варианта, но он ничем не помог
+    
+     ```python3
+    optim.AdamW(model.parameters(), lr = 1e-4, weight_decay = 0.5)
+    ```
+    ```python3
+    optim.AdamW(model.parameters(), lr = 2e-4, weight_decay = 0.5)
+    ```
+    
+    Всё ещё была очень плохая сходимость. На этот моменте я решил добавить scheduler и получился запуск с таким кодом
+    
+    ```python3
+    optim.AdamW(model.parameters(), lr = 1e-3, weight_decay = 0.1)
+    torch.optim.lr_scheduler.OneCycleLR(optimizer, max_lr = 0.001, steps_per_epoch = len(train_loader), epochs = 10)
+    ```
+    
+    Тут ситуация улучшилась и я решил добавить warm-up, который сразу показал неплохой результат. Я выводил во время обучения перевод и таргет, и было видно заметное улучшение в обучении наглядно ещё на этапе warm-up.
+    
+    ```python3
+    optim.AdamW(model.parameters(), lr = 1e-3, weight_decay = 1)
+    scheduler1 = torch.optim.lr_scheduler.LinearLR(optimizer, start_factor = 1e-1, end_factor = 1, total_iters = 5)
+    scheduler2 = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max = 5, eta_min = 1e-5)
+    scheduler = torch.optim.lr_scheduler.SequentialLR(optimizer, [scheduler1, scheduler2], milestones = [5])
+    ```
+    
+    ```python3
+    optim.AdamW(model.parameters(), lr = 1e-3, weight_decay = 1)
+    scheduler1 = torch.optim.lr_scheduler.LinearLR(optimizer, start_factor = 1e-3, end_factor = 1, total_iters = 5)
+    scheduler2 = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max = 10, eta_min = 1e-5)
+    scheduler = torch.optim.lr_scheduler.SequentialLR(optimizer, [scheduler1, scheduler2], milestones = [10])
+    ```
+    
+    Наглядно стало понятно, что это неплохой вариант + результат в ботике стал лучше и я решил остановиться на таком варианте, обучив итоговую модель таким образом
+    
+    ```python3
+    optimizer = optim.AdamW(model.parameters(), lr = 1e-3, weight_decay = 1)
+    scheduler1 = torch.optim.lr_scheduler.LinearLR(optimizer, start_factor = 1e-3, end_factor = 1, total_iters = 10)
+    scheduler2 = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max = 40, eta_min = 1e-5)
+    scheduler = torch.optim.lr_scheduler.SequentialLR(optimizer, [scheduler1, scheduler2], milestones = [10])
+    ```
+## Ключевой момент работы
+
+На данном этапе я понял, что не могу выбить даже 20 Bleu, что бы ни делал. Предположил, что где-то есть баги. Запустил обучение на 1 строке и увидел, что модель не может выучить даже 1 строку. Подебажив код, нашёл несколько багов, в основном связанных с тем, что не завёл переменную для глобальной константы и забывал править во всех местах, после чего получил нормальный перевод
+
+<img width="417" alt="image" src="https://github.com/user-attachments/assets/bae4ce34-c811-4972-97fc-27a876090a69" />
+
+## Обучение финальной модели
+
+Тут мне хотелось выбрать размеры словаря на двух языках. Лучшая модель(1) имела немецкий словарь размера 22024 и английской словарь размера 11159. Ещё я обучил модель(2) с размерами 13074, 21950 соответственно. Получилось, что первая модель лучше.
+
+|   | модель 1 | модель 2 |
+|:------------- |:---------------:| -------------:|
+| 0 эпох        | 0.0         | 0.0     |
+| 20 эпох        | 21.57          | 17.04       |
+| 40 эпох        | 27.22          | 26.29        |
+| 50 эпох        | 27.72         | 26.81        |
+
+Далее я решил использовать первую модель и больше ничего не обучать.
 
