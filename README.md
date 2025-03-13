@@ -174,7 +174,8 @@ test_src  = read_file(test_de_path)
 ## Улучшение beam search
 
 Я решил добавить зависимость от длины в beam search, деля очередную вероятность на длину перевода в какой-то степени power. Получилились такие результаты
-![image](https://github.com/user-attachments/assets/726fe3ff-00ca-4928-accd-4973c4c31010)
+![image](https://github.com/user-attachments/assets/acd962d9-8c8c-4b09-93bc-b96e744bb856)
+
 
 
 Красный крестик - без оптимизации.
